@@ -5,3 +5,6 @@ git commit -m "first commit"
 git branch -M main
 git remote add origin https://github.com/Eth4nSP/Movil-TarjetasGO.git
 git push -u origin main
+
+
+npx expo start --tunnel
