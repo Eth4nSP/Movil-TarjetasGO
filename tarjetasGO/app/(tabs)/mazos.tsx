@@ -7,41 +7,63 @@ import { Ionicons } from '@expo/vector-icons';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { onAuthStateChanged } from 'firebase/auth';
-
-// Importamos la función desde la raíz para crear la sesión
 import { crearSesionColaborativa } from '../../sesioneService'; 
 
 export default function MazosScreen() {
-  // Estados para la gestión de Mazos
-  const [mazos, setMazos] = useState([]);
+  const [tabActivo, setTabActivo] = useState('personales');
+
+  const [mazosPersonales, setMazosPersonales] = useState([]);
+  const [mazosGrupalesBase, setMazosGrupalesBase] = useState([]); 
+  
   const [modalVisible, setModalVisible] = useState(false);
   const [nuevoNombre, setNuevoNombre] = useState('');
   const [editId, setEditId] = useState(null);
   
-  // Estados para unirse a Sesiones Colaborativas
   const [modalUnirseVisible, setModalUnirseVisible] = useState(false);
   const [codigoIngresado, setCodigoIngresado] = useState('');
 
   const router = useRouter();
 
-  // HU7: Visualizar mazos en tiempo real de forma segura
   useEffect(() => {
     const unsubscribeAuth = onAuthStateChanged(auth, (currentUser) => {
       if (currentUser) {
-        const q = query(collection(db, "Mazos"), where("userId", "==", currentUser.uid));
-        const unsubscribeSnapshot = onSnapshot(q, (snapshot) => {
+        // 1. Mazos creados por mí
+        const qPersonales = query(collection(db, "Mazos"), where("userId", "==", currentUser.uid));
+        const unsubPersonales = onSnapshot(qPersonales, (snapshot) => {
           const lista = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-          setMazos(lista);
+          setMazosPersonales(lista);
         });
-        return () => unsubscribeSnapshot();
+
+        // 2. Mazos donde soy invitado/colaborador
+        const qGrupales = query(collection(db, "Mazos"), where("colaboradores", "array-contains", currentUser.uid));
+        const unsubGrupales = onSnapshot(qGrupales, (snapshot) => {
+          const lista = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+          setMazosGrupalesBase(lista);
+        });
+
+        return () => {
+          unsubPersonales();
+          unsubGrupales();
+        };
       } else {
-        setMazos([]); 
+        setMazosPersonales([]); 
+        setMazosGrupalesBase([]);
       }
     });
     return () => unsubscribeAuth();
   }, []);
 
-  // HU6 & HU8: Crear y Editar Mazo
+  // 🔥 NUEVO: Fusionamos los mazos donde soy invitado + los míos que son colaborativos
+  const mazosGrupalesCompletos = [...mazosGrupalesBase];
+  mazosPersonales.forEach(mazo => {
+    if (mazo.colaboradores && mazo.colaboradores.length > 0) {
+      // Evitamos duplicados por si acaso
+      if (!mazosGrupalesCompletos.find(g => g.id === mazo.id)) {
+        mazosGrupalesCompletos.push(mazo);
+      }
+    }
+  });
+
   const guardarMazo = async () => {
     if (nuevoNombre.trim() === '') return;
     try {
@@ -51,14 +73,14 @@ export default function MazosScreen() {
         await addDoc(collection(db, "Mazos"), {
           nombre: nuevoNombre,
           userId: auth.currentUser.uid,
-          fechaCreacion: new Date()
+          fechaCreacion: new Date(),
+          colaboradores: [] 
         });
       }
       cerrarModal();
     } catch (e) { Alert.alert("Error", e.message); }
   };
 
-  // HU9: Eliminar Mazo (Con soporte Web/Móvil)
   const eliminarMazo = async (id) => {
     if (Platform.OS === 'web') {
       if (window.confirm("¿Seguro que deseas eliminar este mazo?")) {
@@ -78,150 +100,132 @@ export default function MazosScreen() {
     setEditId(null);
   };
 
-  // HU17: Crear e Iniciar Sesión Colaborativa
   const handleIniciarGrupo = async (mazoId, nombreMazo) => {
     const sesionId = await crearSesionColaborativa(mazoId, nombreMazo);
     if (sesionId) {
-      // Redirige al lobby pasándole el ID de la sesión recién creada
       router.push({ pathname: '/sesion/lobby', params: { id: sesionId } });
     }
   };
 
-  // HU19: Unirse a una sesión mediante código manual
   const handleUnirseConCodigo = async () => {
     if (codigoIngresado.trim().length !== 6) {
       Alert.alert("Atención", "El código debe tener 6 dígitos.");
       return;
     }
-
     try {
-      // Buscamos la sesión que coincida con el código
       const q = query(collection(db, "sesiones"), where("codigoAcceso", "==", codigoIngresado));
       const querySnapshot = await getDocs(q);
-
       if (querySnapshot.empty) {
         Alert.alert("Error", "No se encontró ninguna sala con este código.");
         return;
       }
-
-      // Extraemos el ID real de Firestore
       const sesionEncontrada = querySnapshot.docs[0];
       const sesionIdReal = sesionEncontrada.id;
 
-      // Limpiamos modal y redirigimos al validador automático
       setModalUnirseVisible(false);
       setCodigoIngresado('');
       router.push({ pathname: '/sesion/[id]', params: { id: sesionIdReal } });
-
     } catch (error) {
       Alert.alert("Error", "Hubo un problema al buscar la sala.");
     }
   };
 
+  const dataMostrar = tabActivo === 'personales' ? mazosPersonales : mazosGrupalesCompletos;
+
   return (
     <ThemedView style={styles.container}>
-      <ThemedText type="title" style={styles.title}>Mis Mazos</ThemedText>
+      <ThemedText type="title" style={styles.title}>Mazos de Estudio</ThemedText>
 
-      {/* Botón para entrar a una sala con código */}
-      <TouchableOpacity 
-        style={styles.btnEntrarSala}
-        onPress={() => setModalUnirseVisible(true)}
-      >
+      <TouchableOpacity style={styles.btnEntrarSala} onPress={() => setModalUnirseVisible(true)}>
         <Ionicons name="enter" size={20} color="white" />
         <ThemedText style={{ color: 'white', fontWeight: 'bold' }}> ENTRAR A SALA (CON CÓDIGO)</ThemedText>
       </TouchableOpacity>
+
+      <View style={styles.tabsContainer}>
+        <TouchableOpacity style={[styles.tabButton, tabActivo === 'personales' && styles.tabActivo]} onPress={() => setTabActivo('personales')}>
+          <ThemedText style={[styles.tabText, tabActivo === 'personales' && styles.tabTextActivo]}>Mis Mazos</ThemedText>
+        </TouchableOpacity>
+        <TouchableOpacity style={[styles.tabButton, tabActivo === 'grupales' && styles.tabActivo]} onPress={() => setTabActivo('grupales')}>
+          <ThemedText style={[styles.tabText, tabActivo === 'grupales' && styles.tabTextActivo]}>Grupales</ThemedText>
+        </TouchableOpacity>
+      </View>
       
       <FlatList
-        data={mazos}
+        data={dataMostrar}
         keyExtractor={(item) => item.id}
-        renderItem={({ item }) => (
-          <TouchableOpacity 
-            style={styles.mazoCard} 
-            onPress={() => router.push({ pathname: '/mazo/[id]', params: { id: item.id } })} 
-          >
-            <ThemedText style={styles.mazoNombre}>{item.nombre}</ThemedText>
-            
-            <View style={styles.iconos}>
-              {/* Botón de Estudio Grupal */}
-              <TouchableOpacity onPress={() => handleIniciarGrupo(item.id, item.nombre)}>
-                <Ionicons name="people" size={24} color="#4CAF50" />
-              </TouchableOpacity>
+        renderItem={({ item }) => {
+          const soyElDueno = item.userId === auth.currentUser?.uid;
 
-              <TouchableOpacity onPress={() => { setEditId(item.id); setNuevoNombre(item.nombre); setModalVisible(true); }}>
-                <Ionicons name="pencil" size={20} color="#A1CEDC" />
-              </TouchableOpacity>
+          return (
+            <TouchableOpacity style={styles.mazoCard} onPress={() => router.push({ pathname: '/mazo/[id]', params: { id: item.id } })}>
+              <View style={{ flex: 1 }}>
+                <ThemedText style={styles.mazoNombre}>{item.nombre}</ThemedText>
+                
+                {tabActivo === 'grupales' && (
+                  soyElDueno 
+                    ? <ThemedText style={styles.badgeDueno}>👑 Eres el Dueño</ThemedText>
+                    : <ThemedText style={styles.badgeGrupal}>👥 Mazo Compartido</ThemedText>
+                )}
+              </View>
               
-              <TouchableOpacity onPress={() => eliminarMazo(item.id)}>
-                <Ionicons name="trash" size={20} color="#FF3B30" />
-              </TouchableOpacity>
-            </View>
-          </TouchableOpacity>
-        )}
+              <View style={styles.iconos}>
+                <TouchableOpacity onPress={() => handleIniciarGrupo(item.id, item.nombre)}>
+                  <Ionicons name="people" size={24} color="#4CAF50" />
+                </TouchableOpacity>
+
+                {soyElDueno && (
+                  <>
+                    <TouchableOpacity onPress={() => { setEditId(item.id); setNuevoNombre(item.nombre); setModalVisible(true); }}>
+                      <Ionicons name="pencil" size={20} color="#A1CEDC" />
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={() => eliminarMazo(item.id)}>
+                      <Ionicons name="trash" size={20} color="#FF3B30" />
+                    </TouchableOpacity>
+                  </>
+                )}
+              </View>
+            </TouchableOpacity>
+          );
+        }}
         ListEmptyComponent={
-          <ThemedText style={{ textAlign: 'center', opacity: 0.5, marginTop: 20 }}>
-            Aún no tienes mazos. Toca el botón + para crear uno.
+          <ThemedText style={{ textAlign: 'center', opacity: 0.5, marginTop: 40 }}>
+            {tabActivo === 'personales' 
+              ? "Aún no tienes mazos. Toca el botón + para crear uno." 
+              : "No tienes mazos grupales compartidos aún."}
           </ThemedText>
         }
       />
 
-      {/* FAB para crear nuevo mazo */}
-      <TouchableOpacity style={styles.fab} onPress={() => setModalVisible(true)}>
-        <Ionicons name="add" size={30} color="white" />
-      </TouchableOpacity>
+      {tabActivo === 'personales' && (
+        <TouchableOpacity style={styles.fab} onPress={() => setModalVisible(true)}>
+          <Ionicons name="add" size={30} color="white" />
+        </TouchableOpacity>
+      )}
 
       {/* Modal: Crear / Editar Mazo */}
       <Modal visible={modalVisible} transparent animationType="slide">
         <View style={styles.modalCentered}>
           <View style={styles.modalView}>
-            <ThemedText type="subtitle" style={{marginBottom: 15}}>
-              {editId ? "Editar Mazo" : "Nuevo Mazo"}
-            </ThemedText>
-            <TextInput 
-              placeholder="Nombre del mazo" 
-              value={nuevoNombre} 
-              onChangeText={setNuevoNombre}
-              style={styles.input}
-              placeholderTextColor="#888"
-            />
+            <ThemedText type="subtitle" style={{marginBottom: 15}}>{editId ? "Editar Mazo" : "Nuevo Mazo"}</ThemedText>
+            <TextInput placeholder="Nombre del mazo" value={nuevoNombre} onChangeText={setNuevoNombre} style={styles.input} placeholderTextColor="#888" />
             <View style={{ flexDirection: 'row', gap: 10 }}>
-              <TouchableOpacity style={styles.btnSave} onPress={guardarMazo}>
-                <ThemedText>Guardar</ThemedText>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.btnCancel} onPress={cerrarModal}>
-                <ThemedText>Cancelar</ThemedText>
-              </TouchableOpacity>
+              <TouchableOpacity style={styles.btnSave} onPress={guardarMazo}><ThemedText>Guardar</ThemedText></TouchableOpacity>
+              <TouchableOpacity style={styles.btnCancel} onPress={cerrarModal}><ThemedText>Cancelar</ThemedText></TouchableOpacity>
             </View>
           </View>
         </View>
       </Modal>
 
-      {/* Modal: Unirse a Sala con Código */}
+      {/* Modal: Unirse a Sala */}
       <Modal visible={modalUnirseVisible} transparent animationType="fade">
         <View style={styles.modalCentered}>
           <View style={styles.modalView}>
             <ThemedText type="subtitle" style={{marginBottom: 15}}>Unirse a Grupo</ThemedText>
-            <ThemedText style={{opacity: 0.7, marginBottom: 15, textAlign: 'center'}}>
-              Ingresa el código de 6 dígitos que te compartió el anfitrión.
-            </ThemedText>
-            <TextInput 
-              placeholder="Ej: 558719" 
-              value={codigoIngresado} 
-              onChangeText={setCodigoIngresado}
-              style={[styles.input, { textAlign: 'center', fontSize: 24, letterSpacing: 5 }]}
-              keyboardType="numeric"
-              maxLength={6}
-              placeholderTextColor="#888"
-            />
+            <ThemedText style={{opacity: 0.7, marginBottom: 15, textAlign: 'center'}}>Ingresa el código de 6 dígitos que te compartió el anfitrión.</ThemedText>
+            <TextInput placeholder="Ej: 558719" value={codigoIngresado} onChangeText={setCodigoIngresado} style={[styles.input, { textAlign: 'center', fontSize: 24, letterSpacing: 5 }]} keyboardType="numeric" maxLength={6} placeholderTextColor="#888" />
             <View style={{ flexDirection: 'row', gap: 10 }}>
-              <TouchableOpacity style={styles.btnSave} onPress={handleUnirseConCodigo}>
-                <ThemedText>Entrar</ThemedText>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.btnCancel} onPress={() => {
-                setModalUnirseVisible(false);
-                setCodigoIngresado('');
-              }}>
-                <ThemedText>Cancelar</ThemedText>
-              </TouchableOpacity>
+              <TouchableOpacity style={styles.btnSave} onPress={handleUnirseConCodigo}><ThemedText>Entrar</ThemedText></TouchableOpacity>
+              <TouchableOpacity style={styles.btnCancel} onPress={() => { setModalUnirseVisible(false); setCodigoIngresado(''); }}><ThemedText>Cancelar</ThemedText></TouchableOpacity>
             </View>
           </View>
         </View>
@@ -234,30 +238,16 @@ export default function MazosScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, padding: 20, paddingTop: 60 },
   title: { marginBottom: 20 },
-  btnEntrarSala: { 
-    backgroundColor: '#6C5CE7', 
-    padding: 15, 
-    borderRadius: 10, 
-    marginBottom: 20, 
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    elevation: 3,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 3
-  },
-  mazoCard: { 
-    backgroundColor: 'rgba(255,255,255,0.08)', 
-    padding: 20, 
-    borderRadius: 12, 
-    marginBottom: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between'
-  },
-  mazoNombre: { fontSize: 18, fontWeight: 'bold', flex: 1 },
+  tabsContainer: { flexDirection: 'row', backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 10, padding: 5, marginBottom: 20 },
+  tabButton: { flex: 1, paddingVertical: 10, alignItems: 'center', borderRadius: 8 },
+  tabActivo: { backgroundColor: '#A1CEDC' },
+  tabText: { color: 'white', fontWeight: 'bold', opacity: 0.6 },
+  tabTextActivo: { color: '#121212', opacity: 1 },
+  btnEntrarSala: { backgroundColor: '#6C5CE7', padding: 15, borderRadius: 10, marginBottom: 15, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', elevation: 3 },
+  mazoCard: { backgroundColor: 'rgba(255,255,255,0.08)', padding: 20, borderRadius: 12, marginBottom: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  mazoNombre: { fontSize: 18, fontWeight: 'bold' },
+  badgeGrupal: { fontSize: 12, color: '#FFCC00', marginTop: 5, fontWeight: 'bold' },
+  badgeDueno: { fontSize: 12, color: '#4CAF50', marginTop: 5, fontWeight: 'bold' },
   iconos: { flexDirection: 'row', gap: 20, alignItems: 'center' }, 
   fab: { position: 'absolute', right: 30, bottom: 30, backgroundColor: '#A1CEDC', width: 60, height: 60, borderRadius: 30, justifyContent: 'center', alignItems: 'center', elevation: 5 },
   modalCentered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.7)' },

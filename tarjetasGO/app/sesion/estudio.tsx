@@ -14,12 +14,18 @@ export default function EstudioColaborativoScreen() {
   const router = useRouter();
 
   const [tarjetas, setTarjetas] = useState([]);
-  const [indiceActual, setIndiceActual] = useState(0);
-  const [mostrarRespuesta, setMostrarRespuesta] = useState(false);
   const [cargando, setCargando] = useState(true);
   const [esAnfitrion, setEsAnfitrion] = useState(false);
 
-  // 1. Escuchar el ESTADO GLOBAL de la sesión
+  // Estados Globales (Sincronizados con Firebase)
+  const [indiceGlobal, setIndiceGlobal] = useState(0);
+
+  // Estados Locales (Dinámicos por tarjeta)
+  const [mostrarRespuesta, setMostrarRespuesta] = useState(false);
+  const [tiempoRestante, setTiempoRestante] = useState(10);
+  const [yaRespondio, setYaRespondio] = useState(false); // Evita que sumen puntos varias veces
+
+  // 1. Escuchar el ESTADO GLOBAL de la sesión (Incluyendo el índice de la tarjeta)
   useEffect(() => {
     if (!id) return;
 
@@ -31,6 +37,12 @@ export default function EstudioColaborativoScreen() {
           setEsAnfitrion(true);
         }
 
+        // Sincronizar el índice actual para todos
+        if (data.indiceActual !== undefined && data.indiceActual !== indiceGlobal) {
+          setIndiceGlobal(data.indiceActual);
+        }
+
+        // Si el estado vuelve a "esperando", TODOS saltan al lobby
         if (data.estado === "esperando") {
           router.replace({ pathname: '/sesion/lobby', params: { id } });
         }
@@ -38,9 +50,33 @@ export default function EstudioColaborativoScreen() {
     });
 
     return () => unsubscribe();
-  }, [id]);
+  }, [id, indiceGlobal]);
 
-  // 2. Cargar las flashcards colaborativas del mazo
+  // 2. Efecto para reiniciar los estados cada vez que cambian de tarjeta globalmente
+  useEffect(() => {
+    setMostrarRespuesta(false);
+    setTiempoRestante(10);
+    setYaRespondio(false);
+  }, [indiceGlobal]);
+
+  // 3. Efecto del Temporizador (Cuenta regresiva de 10 a 0)
+  useEffect(() => {
+    // Si ya se mostró la respuesta o no hay tarjetas, pausamos el timer
+    if (mostrarRespuesta || tarjetas.length === 0) return;
+
+    if (tiempoRestante === 0) {
+      setMostrarRespuesta(true); // Revela la respuesta automáticamente
+      return;
+    }
+
+    const timer = setInterval(() => {
+      setTiempoRestante((prev) => prev - 1);
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [tiempoRestante, mostrarRespuesta, tarjetas.length]);
+
+  // 4. Cargar las flashcards colaborativas del mazo
   useEffect(() => {
     const fetchTarjetas = async () => {
       if (!id) return;
@@ -66,43 +102,48 @@ export default function EstudioColaborativoScreen() {
     fetchTarjetas();
   }, [id]);
 
-  // Incrementar puntos en Firebase cuando el usuario se sabe la respuesta
-  const sumarPuntoEstudio = async () => {
-    try {
-      const userUid = auth.currentUser?.uid;
-      if (!userUid) return;
+  // Registrar respuesta del usuario
+  const manejarRespuesta = async (acierto) => {
+    setYaRespondio(true); // Bloquea los botones para este usuario
 
-      // Incrementa el contador exclusivo de puntos en juego
-      const participanteRef = doc(db, "sesiones", id, "participantes", userUid);
-      await updateDoc(participanteRef, {
-        puntosContador: increment(1)
-      });
+    if (acierto) {
+      try {
+        const userUid = auth.currentUser?.uid;
+        if (!userUid) return;
 
-      avanzarTarjeta();
-    } catch (error) {
-      console.error("Error al registrar puntos:", error);
+        const participanteRef = doc(db, "sesiones", id, "participantes", userUid);
+        await updateDoc(participanteRef, {
+          puntosContador: increment(1)
+        });
+      } catch (error) {
+        console.error("Error al registrar puntos:", error);
+      }
     }
   };
 
-  const avanzarTarjeta = () => {
-    if (indiceActual < tarjetas.length - 1) {
-      setIndiceActual(indiceActual + 1);
-      setMostrarRespuesta(false);
-    } else {
-      if (esAnfitrion) {
-        Alert.alert("¡Fin del mazo!", "Todos han terminado. ¿Deseas regresar la sala al Lobby?", [
-          { text: "Sí, regresar a todos", onPress: volverAlLobbyGlobal }
-        ]);
-      } else {
-        Alert.alert("¡Fin del mazo!", "Espera a que el anfitrión regrese a todos al Lobby.");
+  // Función exclusiva del Anfitrión: Cambiar la tarjeta para TODOS
+  const avanzarTarjetaGlobal = async () => {
+    if (indiceGlobal < tarjetas.length - 1) {
+      try {
+        await updateDoc(doc(db, "sesiones", id), {
+          indiceActual: increment(1) // Avanza el índice en Firebase
+        });
+      } catch (error) {
+        Alert.alert("Error", "No se pudo avanzar a la siguiente tarjeta.");
       }
+    } else {
+      Alert.alert("¡Fin del mazo!", "¿Deseas regresar la sala al Lobby?", [
+        { text: "Sí, regresar a todos", onPress: volverAlLobbyGlobal }
+      ]);
     }
   };
 
   const volverAlLobbyGlobal = async () => {
     try {
+      // Reiniciamos el índice a 0 para la próxima vez y cambiamos el estado
       await updateDoc(doc(db, "sesiones", id), {
-        estado: "esperando" 
+        estado: "esperando",
+        indiceActual: 0 
       });
     } catch (error) {
       Alert.alert("Error", "No se pudo regresar al lobby.");
@@ -126,7 +167,7 @@ export default function EstudioColaborativoScreen() {
     );
   }
 
-  const tarjetaActual = tarjetas[indiceActual];
+  const tarjetaActual = tarjetas[indiceGlobal];
 
   return (
     <ThemedView style={styles.container}>
@@ -145,41 +186,64 @@ export default function EstudioColaborativoScreen() {
         )}
 
         <ThemedText type="subtitle" style={{ flex: 1, textAlign: 'center' }}>
-          Tarjeta {indiceActual + 1} de {tarjetas.length}
+          Tarjeta {indiceGlobal + 1} de {tarjetas.length}
         </ThemedText>
         <View style={{ width: 30 }} /> 
       </View>
 
-      <TouchableOpacity 
-        style={styles.flashcardGrande} 
-        onPress={() => setMostrarRespuesta(!mostrarRespuesta)}
-        activeOpacity={0.8}
-      >
+      <View style={styles.flashcardGrande}>
+        {/* Temporizador Visual */}
+        {!mostrarRespuesta && (
+          <View style={styles.timerContainer}>
+            <Ionicons name="timer-outline" size={24} color="#FF9500" />
+            <ThemedText style={styles.timerText}>{tiempoRestante}s</ThemedText>
+          </View>
+        )}
+
         <ThemedText type="defaultSemiBold" style={styles.labelCard}>
           {mostrarRespuesta ? "RESPUESTA" : "PREGUNTA"}
         </ThemedText>
         <ThemedText style={styles.textoCard}>
           {mostrarRespuesta ? tarjetaActual.respuesta : tarjetaActual.pregunta}
         </ThemedText>
-        <ThemedText style={styles.hint}>Toca para voltear</ThemedText>
-      </TouchableOpacity>
+      </View>
 
+      {/* Acciones después de mostrar la respuesta */}
       {mostrarRespuesta ? (
-        <View style={styles.botonesContainer}>
-          <TouchableOpacity style={[styles.btnAccion, { backgroundColor: '#FF3B30' }]} onPress={avanzarTarjeta}>
-            <Ionicons name="close-circle" size={24} color="white" />
-            <ThemedText style={styles.btnText}>No lo sabía</ThemedText>
-          </TouchableOpacity>
+        <View style={styles.accionesContainer}>
           
-          {/* Al presionar que sí lo sabía, llama a sumar el punto en Firebase */}
-          <TouchableOpacity style={[styles.btnAccion, { backgroundColor: '#4CAF50' }]} onPress={sumarPuntoEstudio}>
-            <Ionicons name="checkmark-circle" size={24} color="white" />
-            <ThemedText style={styles.btnText}>¡La sabía!</ThemedText>
-          </TouchableOpacity>
+          {/* Botones de calificación individual (Desaparecen al votar) */}
+          {!yaRespondio ? (
+            <View style={styles.botonesVotacion}>
+              <TouchableOpacity style={[styles.btnAccion, { backgroundColor: '#FF3B30' }]} onPress={() => manejarRespuesta(false)}>
+                <Ionicons name="close-circle" size={24} color="white" />
+                <ThemedText style={styles.btnText}>No lo sabía</ThemedText>
+              </TouchableOpacity>
+              
+              <TouchableOpacity style={[styles.btnAccion, { backgroundColor: '#4CAF50' }]} onPress={() => manejarRespuesta(true)}>
+                <Ionicons name="checkmark-circle" size={24} color="white" />
+                <ThemedText style={styles.btnText}>¡La sabía!</ThemedText>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <ThemedText style={{ opacity: 0.7, marginBottom: 20, textAlign: 'center', fontSize: 16 }}>
+              ✅ Respuesta registrada. Esperando...
+            </ThemedText>
+          )}
+
+          {/* Botón de control EXCLUSIVO para el anfitrión */}
+          {esAnfitrion && (
+            <TouchableOpacity style={styles.btnAnfitrionNext} onPress={avanzarTarjetaGlobal}>
+              <ThemedText style={styles.btnText}>
+                {indiceGlobal < tarjetas.length - 1 ? "Siguiente Tarjeta ➡️" : "Finalizar Mazo 🏁"}
+              </ThemedText>
+            </TouchableOpacity>
+          )}
+
         </View>
       ) : (
         <ThemedText style={{ marginTop: 40, opacity: 0.5, textAlign: 'center' }}>
-          Piensa en la respuesta y toca la tarjeta para comprobar.
+          La respuesta se revelará en {tiempoRestante} segundos...
         </ThemedText>
       )}
     </ThemedView>
@@ -204,11 +268,14 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3, 
     shadowRadius: 5 
   },
+  timerContainer: { position: 'absolute', top: 20, right: 20, flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: 'rgba(255, 149, 0, 0.2)', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 15 },
+  timerText: { color: '#FF9500', fontWeight: 'bold', fontSize: 16 },
   labelCard: { position: 'absolute', top: 20, opacity: 0.5, letterSpacing: 2 },
   textoCard: { fontSize: 28, textAlign: 'center', color: 'white' },
-  hint: { position: 'absolute', bottom: 20, fontSize: 12, opacity: 0.4 },
-  botonesContainer: { flexDirection: 'row', gap: 20, marginTop: 40, width: width * 0.85 },
+  accionesContainer: { marginTop: 40, width: width * 0.85, alignItems: 'center' },
+  botonesVotacion: { flexDirection: 'row', gap: 20, width: '100%', marginBottom: 20 },
   btnAccion: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', padding: 15, borderRadius: 12, gap: 10 },
   btnText: { color: 'white', fontWeight: 'bold', fontSize: 16 },
+  btnAnfitrionNext: { backgroundColor: '#6C5CE7', padding: 18, borderRadius: 12, width: '100%', alignItems: 'center', elevation: 5 },
   btnVolver: { backgroundColor: '#6C5CE7', padding: 15, borderRadius: 10, marginTop: 20 }
 });
