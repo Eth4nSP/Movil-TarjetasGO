@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { StyleSheet, TextInput, TouchableOpacity, ActivityIndicator, ScrollView, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router'; // <-- Importamos useRouter para redireccionar al salir
+import { useRouter } from 'expo-router';
 
 import { auth, db } from '../../firebaseConfig';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
-import { onAuthStateChanged, updateEmail, updatePassword, signOut } from 'firebase/auth'; // <-- Importamos funciones de actualización
+import { onAuthStateChanged, updateEmail, updatePassword, signOut } from 'firebase/auth';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -14,13 +14,11 @@ export default function ProfileScreen() {
   const [loading, setLoading] = useState(true);
   const [isEditing, setIsEditing] = useState(false);
   const [currentUser, setCurrentUser] = useState<any>(null);
-  
-  // Añadimos newPassword al estado para manejar el cambio de contraseña
   const [newPassword, setNewPassword] = useState('');
   const [userData, setUserData] = useState({
     nombre: '',
     email: '',
-    sqlId: '' // Mantenemos el ID secuencial si lo estabas usando
+    sqlId: ''
   });
 
   const router = useRouter();
@@ -29,33 +27,25 @@ export default function ProfileScreen() {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       if (user) {
         setCurrentUser(user);
-        fetchUserProfile(user.uid, user.email); 
+        fetchUserProfile(user.uid, user.email);
       } else {
         setLoading(false);
-        // Opcional: Redirigir al login si no hay usuario
-        // router.replace('/auth/login'); 
       }
     });
-
     return unsubscribe;
   }, []);
 
   const fetchUserProfile = async (uid: string, authEmail: string | null) => {
     try {
       if (!db || !uid) return;
-
       const docRef = doc(db, "Usuarios", uid);
       const docSnap = await getDoc(docRef);
-
       if (docSnap.exists()) {
         const data = docSnap.data();
-        setUserData({ 
-          ...data, 
-          email: data.email || authEmail || '' // Aseguramos que el correo cargue en el estado
-        } as any);
+        setUserData({ ...data, email: data.email || authEmail || '' } as any);
       }
     } catch (error) {
-      console.error("Error al cargar perfil en móvil:", error);
+      console.error("Error al cargar perfil:", error);
     } finally {
       setLoading(false);
     }
@@ -64,21 +54,13 @@ export default function ProfileScreen() {
   const handleUpdate = async () => {
     if (!currentUser) return;
     setLoading(true);
-    
     try {
-      // 1. Actualizar datos en Firestore (Nombre y Correo)
       const docRef = doc(db, "Usuarios", currentUser.uid);
-      await updateDoc(docRef, {
-        nombre: userData.nombre,
-        email: userData.email,
-      });
+      await updateDoc(docRef, { nombre: userData.nombre, email: userData.email });
 
-      // 2. Actualizar el correo en Firebase Auth (si fue modificado)
       if (userData.email !== currentUser.email) {
         await updateEmail(currentUser, userData.email);
       }
-
-      // 3. Actualizar la contraseña en Firebase Auth (si el campo no está vacío)
       if (newPassword.trim().length > 0) {
         if (newPassword.length < 6) {
           Alert.alert("Atención", "La nueva contraseña debe tener al menos 6 caracteres.");
@@ -86,21 +68,13 @@ export default function ProfileScreen() {
           return;
         }
         await updatePassword(currentUser, newPassword);
-        setNewPassword(''); // Limpiamos el campo después de actualizar
+        setNewPassword('');
       }
-
       setIsEditing(false);
       Alert.alert("¡Éxito!", "Tu perfil ha sido actualizado correctamente.");
-
     } catch (error: any) {
-      console.error("Error al actualizar:", error);
-      
-      // Manejo del error de seguridad de Firebase
       if (error.code === 'auth/requires-recent-login') {
-        Alert.alert(
-          "Seguridad", 
-          "Por motivos de seguridad, debes cerrar sesión y volver a ingresar para cambiar tu correo o contraseña."
-        );
+        Alert.alert("Seguridad", "Debes cerrar sesión y volver a ingresar para cambiar tu correo o contraseña.");
       } else if (error.code === 'auth/invalid-email') {
         Alert.alert("Error", "El formato del correo no es válido.");
       } else {
@@ -114,36 +88,55 @@ export default function ProfileScreen() {
   const handleLogout = async () => {
     try {
       await signOut(auth);
-      router.replace('/auth/login'); // Redirige a tu pantalla de login (ajusta la ruta según tu proyecto)
+      router.replace('/auth/login');
     } catch (error) {
       Alert.alert("Error", "No se pudo cerrar sesión.");
     }
   };
 
+  const getInitials = (name: string) => {
+    if (!name) return '?';
+    return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
+  };
+
   if (loading && !isEditing) {
     return (
       <ThemedView style={styles.centered}>
-        <ActivityIndicator size="large" color="#A1CEDC" />
+        <ActivityIndicator size="large" color="#4db6ac" />
       </ThemedView>
     );
   }
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
+    <ScrollView contentContainerStyle={styles.container} style={styles.scrollBackground}>
+
+      {/* HEADER */}
       <ThemedView style={styles.header}>
-        <ThemedText type="title">Mi Perfil</ThemedText>
-        <TouchableOpacity onPress={() => isEditing ? handleUpdate() : setIsEditing(true)}>
-          <Ionicons 
-            name={isEditing ? "checkmark-circle" : "create-outline"} 
-            size={28} 
-            color={isEditing ? "#4CAF50" : "#A1CEDC"} 
+        <ThemedText style={styles.titleText}>Mi Perfil</ThemedText>
+        <TouchableOpacity
+          style={styles.iconButton}
+          onPress={() => isEditing ? handleUpdate() : setIsEditing(true)}
+        >
+          <Ionicons
+            name={isEditing ? "checkmark-circle" : "create-outline"}
+            size={24}
+            color={isEditing ? "#4db6ac" : "#64b5f6"}
           />
         </TouchableOpacity>
       </ThemedView>
 
+      {/* AVATAR */}
+      <ThemedView style={styles.avatarContainer}>
+        <ThemedView style={styles.avatar}>
+          <ThemedText style={styles.avatarText}>
+            {getInitials(userData.nombre)}
+          </ThemedText>
+        </ThemedView>
+      </ThemedView>
+
+      {/* CARD */}
       <ThemedView style={styles.card}>
-        
-        {/* NOMBRE */}
+
         <ThemedText style={styles.label}>Nombre de usuario</ThemedText>
         {isEditing ? (
           <TextInput
@@ -151,13 +144,14 @@ export default function ProfileScreen() {
             value={userData.nombre}
             onChangeText={(text) => setUserData({ ...userData, nombre: text })}
             placeholder="Escribe tu nombre"
-            placeholderTextColor="#888"
+            placeholderTextColor="#a8d5d1"
           />
         ) : (
           <ThemedText style={styles.value}>{userData.nombre || "Sin nombre"}</ThemedText>
         )}
 
-        {/* CORREO ELECTRÓNICO */}
+        <ThemedView style={styles.divider} />
+
         <ThemedText style={styles.label}>Correo Electrónico</ThemedText>
         {isEditing ? (
           <TextInput
@@ -165,7 +159,7 @@ export default function ProfileScreen() {
             value={userData.email}
             onChangeText={(text) => setUserData({ ...userData, email: text })}
             placeholder="nuevo@correo.com"
-            placeholderTextColor="#888"
+            placeholderTextColor="#a8d5d1"
             keyboardType="email-address"
             autoCapitalize="none"
           />
@@ -173,93 +167,194 @@ export default function ProfileScreen() {
           <ThemedText style={styles.valueReadOnly}>{userData.email || currentUser?.email}</ThemedText>
         )}
 
-        {/* CONTRASEÑA (Solo visible al editar) */}
         {isEditing && (
           <>
-            <ThemedText style={[styles.label, { marginTop: 10 }]}>Nueva Contraseña</ThemedText>
+            <ThemedView style={styles.divider} />
+            <ThemedText style={styles.label}>Nueva Contraseña</ThemedText>
             <TextInput
               style={styles.input}
               value={newPassword}
               onChangeText={setNewPassword}
               placeholder="Deja en blanco para no cambiarla"
-              placeholderTextColor="#888"
+              placeholderTextColor="#a8d5d1"
               secureTextEntry
             />
           </>
         )}
-        
-        {/* ID DE USUARIO (Auth UID) */}
+
         {!isEditing && (
           <>
+            <ThemedView style={styles.divider} />
             <ThemedText style={styles.label}>ID de Usuario</ThemedText>
-            <ThemedText style={[styles.valueReadOnly, { fontSize: 10 }]}>{currentUser?.uid}</ThemedText>
+            <ThemedText style={styles.valueSmall}>{currentUser?.uid}</ThemedText>
           </>
         )}
 
       </ThemedView>
 
-      {/* BOTÓN CANCELAR */}
+      {/* CANCELAR */}
       {isEditing && (
-        <TouchableOpacity style={styles.cancelButton} onPress={() => {
-          setIsEditing(false);
-          setNewPassword(''); // Limpiamos la contraseña si cancela
-        }}>
-          <ThemedText style={{ color: '#FF3B30', fontWeight: '600' }}>Cancelar edición</ThemedText>
+        <TouchableOpacity
+          style={styles.cancelButton}
+          onPress={() => { setIsEditing(false); setNewPassword(''); }}
+        >
+          <ThemedText style={styles.cancelText}>Cancelar edición</ThemedText>
         </TouchableOpacity>
       )}
 
-      {/* BOTÓN CERRAR SESIÓN */}
+      {/* CERRAR SESIÓN */}
       {!isEditing && (
         <ThemedView style={styles.footer}>
           <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
             <Ionicons name="log-out-outline" size={20} color="white" />
-            <ThemedText style={{ color: 'white', fontWeight: 'bold' }}> Cerrar Sesión</ThemedText>
+            <ThemedText style={styles.logoutText}> Cerrar Sesión</ThemedText>
           </TouchableOpacity>
         </ThemedView>
       )}
+
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  container: { padding: 25, paddingTop: 60, paddingBottom: 40 },
-  header: { 
-    flexDirection: 'row', 
-    justifyContent: 'space-between', 
-    alignItems: 'center', 
-    marginBottom: 30 
+  scrollBackground: {
+    backgroundColor: '#e0f2f1',
   },
-  card: {
-    backgroundColor: 'rgba(150, 150, 150, 0.1)', 
-    padding: 20,
-    borderRadius: 15,
-    gap: 15
-  },
-  label: { fontSize: 12, opacity: 0.6, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 },
-  value: { fontSize: 18, fontWeight: '500', color: '#fff' },
-  valueReadOnly: { fontSize: 16, opacity: 0.5, color: '#fff' },
-  input: {
-    borderBottomWidth: 2,
-    borderBottomColor: '#A1CEDC',
-    fontSize: 18,
-    paddingVertical: 8,
-    color: '#fff',
-    marginBottom: 5
-  },
-  cancelButton: { marginTop: 25, alignItems: 'center', padding: 10 },
-  footer: { marginTop: 40 },
-  logoutButton: {
-    backgroundColor: '#FF3B30',
-    flexDirection: 'row',
-    padding: 16,
-    borderRadius: 12,
+  centered: {
+    flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    elevation: 3, 
-    shadowColor: '#000', 
+    backgroundColor: '#e0f2f1',
+  },
+  container: {
+    padding: 25,
+    paddingTop: 60,
+    paddingBottom: 40,
+    backgroundColor: '#e3f2fd', // azul muy suave hacia abajo
+  },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 24,
+    backgroundColor: 'transparent',
+  },
+  titleText: {
+    fontSize: 26,
+    fontWeight: '500',
+    color: '#1a5c52',
+  },
+  iconButton: {
+    backgroundColor: '#ffffff',
+    borderRadius: 22,
+    width: 44,
+    height: 44,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#4db6ac',
     shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  avatarContainer: {
+    alignItems: 'center',
+    marginBottom: 24,
+    backgroundColor: 'transparent',
+  },
+  avatar: {
+    width: 76,
+    height: 76,
+    borderRadius: 38,
+    backgroundColor: '#80cbc4',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 3,
+    borderColor: '#ffffff',
+    shadowColor: '#4db6ac',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  avatarText: {
+    fontSize: 28,
+    fontWeight: '500',
+    color: '#1a5c52',
+  },
+  card: {
+    backgroundColor: '#ffffff',
+    padding: 22,
+    borderRadius: 20,
+    gap: 12,
+    shadowColor: '#4db6ac',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    elevation: 4,
+  },
+  divider: {
+    height: 1,
+    backgroundColor: '#e0f2f1',
+  },
+  label: {
+    fontSize: 11,
+    color: '#4db6ac',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    marginBottom: 2,
+  },
+  value: {
+    fontSize: 17,
+    fontWeight: '500',
+    color: '#1a5c52',
+  },
+  valueReadOnly: {
+    fontSize: 15,
+    color: '#90b8b4',
+  },
+  valueSmall: {
+    fontSize: 10,
+    color: '#90b8b4',
+  },
+  input: {
+    borderBottomWidth: 2,
+    borderBottomColor: '#80cbc4',
+    fontSize: 17,
+    paddingVertical: 8,
+    color: '#1a5c52',
+    marginBottom: 4,
+  },
+  cancelButton: {
+    marginTop: 20,
+    alignItems: 'center',
+    padding: 12,
+  },
+  cancelText: {
+    color: '#64b5f6',
+    fontWeight: '600',
+    fontSize: 15,
+  },
+  footer: {
+    marginTop: 32,
+    backgroundColor: 'transparent',
+  },
+  logoutButton: {
+    backgroundColor: '#4db6ac',
+    flexDirection: 'row',
+    padding: 16,
+    borderRadius: 14,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#00897b',
+    shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-  }
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  logoutText: {
+    color: 'white',
+    fontWeight: 'bold',
+    fontSize: 16,
+  },
 });
