@@ -131,18 +131,29 @@ const styles = StyleSheet.create({
   authContainer: {
     flex: 1,
     justifyContent: 'center',
-    padding: 20,
+    paddingHorizontal: 24,
+    backgroundColor: '#121212', // Un fondo oscuro puro, muy moderno
   },
   input: {
-    backgroundColor: '#f0f0f0',
-    padding: 15,
-    borderRadius: 10,
-    marginBottom: 15,
-    color: '#000',
-    borderWidth: 1,
-    borderColor: '#ddd'
+    backgroundColor: '#1E1E1E', // Ligeramente más claro que el fondo para resaltar
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    borderRadius: 14, // Curvas más pronunciadas (estilo iOS/moderno)
+    marginBottom: 20,
+    color: '#FFFFFF', // Texto en blanco para contrastar
+    fontSize: 16,
+    letterSpacing: 0.5,
+    borderWidth: 1.5,
+    borderColor: '#2A2A2A', // Borde sutil que le da estructura
+    // Sombras para iOS
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 5,
+    // Sombra para Android
+    elevation: 5, 
   },
   buttonGap: {
-    marginTop: 10,
+    marginTop: 24, // Un poco más de aire para que la interfaz respire
   },
 });
